@@ -5,6 +5,16 @@ sets those keys once, then the sidebar is fully independent on every rerun.
 """
 
 import os, re, json
+
+# macOS: XGBoost needs libomp; use the one bundled with scikit-learn if brew's is missing
+try:
+    import sklearn
+    _omp_dir = os.path.join(os.path.dirname(sklearn.__file__), ".dylibs")
+    if os.path.isdir(_omp_dir):
+        os.environ.setdefault("DYLD_LIBRARY_PATH", _omp_dir)
+except Exception:
+    pass
+
 import numpy as np
 import pandas as pd
 import joblib
@@ -217,40 +227,32 @@ def do_clear():
 # ── Main area ─────────────────────────────────────────────────────────────────
 st.title("🏠 Amsterdam Airbnb Stay Value Predictor")
 
-col_url, col_look, col_clr, col_pred = st.columns([5, 1, 1, 1])
+col_url, col_pred, col_clr = st.columns([5, 1, 1])
 with col_url:
     url_input = st.text_input(
-        "Paste an Airbnb listing URL to auto-fill:",
+        "Paste an Airbnb listing URL — or fill in the sidebar — then hit Predict:",
         placeholder="https://www.airbnb.com/rooms/12345678",
         label_visibility="visible",
     )
-with col_look:
+with col_pred:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🔍 Look up", use_container_width=True) and url_input.strip():
-        do_lookup(url_input.strip())
+    predict_clicked = st.button("🔮 Predict", use_container_width=True,
+                                type="primary", key="main_predict")
 with col_clr:
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("✕ Clear", use_container_width=True, on_click=do_clear)
-with col_pred:
-    st.markdown("<br>", unsafe_allow_html=True)
-    predict_top = st.button("🔮 Predict", use_container_width=True,
-                            type="primary", key="top_predict")
+
+# If Predict was clicked with a URL, do the lookup NOW — before sidebar renders —
+# so the sidebar widgets pick up the fresh session-state values this same rerun.
+if predict_clicked and url_input.strip():
+    do_lookup(url_input.strip())
 
 if st.session_state.lookup_error:
     st.warning(st.session_state.lookup_error)
 
-# Banner — only when a URL has been matched and user hasn't drifted
+# Banner — shown whenever a listing was matched (and user hasn't cleared it)
 if st.session_state.listed_price is not None:
-    price_str = f"€{st.session_state.listed_price:.0f}/night"
-    b_col, p_col = st.columns([7, 1])
-    with b_col:
-        st.success(f"**Found:** {st.session_state.listing_name} · {price_str}")
-    with p_col:
-        st.markdown("<br>", unsafe_allow_html=True)
-        predict_inline = st.button("🔮 Predict", type="primary",
-                                   use_container_width=True, key="inline_predict")
-else:
-    predict_inline = False
+    st.success(f"**Found:** {st.session_state.listing_name} · €{st.session_state.listed_price:.0f}/night")
 
 st.markdown("---")
 
@@ -410,8 +412,6 @@ with st.sidebar:
              "Professional hosts with many listings behave differently from occasional renters.",
     )
 
-    predict_btn = st.button("🔮 Predict", use_container_width=True,
-                            type="primary", key="sidebar_predict")
 
 
 # ── Description ───────────────────────────────────────────────────────────────
@@ -438,39 +438,52 @@ with st.expander("🔬 How the models work", expanded=False):
     """)
 
 # ── Prediction ────────────────────────────────────────────────────────────────
-if predict_btn or predict_inline or predict_top:
-    # NaN for unset/unknown fields → SimpleImputer fills median/most_frequent
-    r_scores = [review_scores_rating, review_scores_cleanliness, review_scores_location]
-    review_composite = float(np.nanmean(r_scores)) if not all(np.isnan(v) if isinstance(v, float) else False for v in r_scores) else np.nan
+if predict_clicked:
+    # Always read from session state so that a same-click URL lookup is reflected
+    ss = st.session_state
+    _no_ratings    = ss.get("no_ratings", False)
+    _unknown_rates = ss.get("unknown_rates", False)
+    _acc  = ss.get("accommodates", 2)
+    _beds = ss.get("beds", 1)
+    _hlc  = ss.get("host_listings", 1)
+    _rsr  = np.nan if _no_ratings else ss.get("review_scores_rating", 4.5)
+    _rsc  = np.nan if _no_ratings else ss.get("review_scores_cleanliness", 4.5)
+    _rsl  = np.nan if _no_ratings else ss.get("review_scores_location", 4.8)
+    _hrr  = np.nan if _unknown_rates else float(ss.get("host_response_rate", 90))
+    _har  = np.nan if _unknown_rates else float(ss.get("host_acceptance_rate", 80))
+
+    _r_scores = [_rsr, _rsc, _rsl]
+    review_composite = (float(np.nanmean([v for v in _r_scores if not (isinstance(v, float) and np.isnan(v))]))
+                        if any(not (isinstance(v, float) and np.isnan(v)) for v in _r_scores) else np.nan)
 
     X_input = pd.DataFrame([{
-        "accommodates":   accommodates,
-        "bathrooms":      bathrooms,
-        "bedrooms":       bedrooms,
-        "beds":           beds,
-        "minimum_nights": minimum_nights,
-        "maximum_nights": maximum_nights,
-        "number_of_reviews":     number_of_reviews,
-        "number_of_reviews_ltm": number_of_reviews_ltm,
-        "reviews_per_month":     reviews_per_month,
+        "accommodates":   _acc,
+        "bathrooms":      ss.get("bathrooms", 1.0),
+        "bedrooms":       ss.get("bedrooms", 1),
+        "beds":           _beds,
+        "minimum_nights": ss.get("minimum_nights", 2),
+        "maximum_nights": ss.get("maximum_nights", 365),
+        "number_of_reviews":     ss.get("number_of_reviews", 20),
+        "number_of_reviews_ltm": ss.get("number_of_reviews_ltm", 5),
+        "reviews_per_month":     ss.get("reviews_per_month", 0.5),
         "review_composite":          review_composite,
-        "review_scores_rating":      review_scores_rating,
-        "review_scores_cleanliness": review_scores_cleanliness,
-        "review_scores_location":    review_scores_location,
-        "host_years":            host_years,
-        "host_response_rate":    float(host_response_rate) if not isinstance(host_response_rate, float) or not np.isnan(host_response_rate) else np.nan,
-        "host_acceptance_rate":  float(host_acceptance_rate) if not isinstance(host_acceptance_rate, float) or not np.isnan(host_acceptance_rate) else np.nan,
-        "calculated_host_listings_count": calculated_host_listings_count,
-        "amenity_count":  amenity_count,
-        "beds_per_person": beds / accommodates if accommodates > 0 else 1.0,
-        "host_is_superhost":       int(host_is_superhost),
-        "host_identity_verified":  int(host_identity_verified),
-        "instant_bookable":        int(instant_bookable),
-        "multi_listing_host":      int(calculated_host_listings_count > 1),
-        "neighbourhood_cleansed":  neighbourhood,   # None → imputer uses most_frequent
-        "room_type":               room_type,
-        "property_type":           property_type,
-        "host_response_time":      host_response_time,
+        "review_scores_rating":      _rsr,
+        "review_scores_cleanliness": _rsc,
+        "review_scores_location":    _rsl,
+        "host_years":            ss.get("host_years", 3.0),
+        "host_response_rate":    _hrr,
+        "host_acceptance_rate":  _har,
+        "calculated_host_listings_count": _hlc,
+        "amenity_count":  ss.get("amenity_count", 30),
+        "beds_per_person": _beds / _acc if _acc > 0 else 1.0,
+        "host_is_superhost":       int(ss.get("host_is_superhost", False)),
+        "host_identity_verified":  int(ss.get("host_identity_verified", True)),
+        "instant_bookable":        int(ss.get("instant_bookable", False)),
+        "multi_listing_host":      int(_hlc > 1),
+        "neighbourhood_cleansed":  ss.get("nb"),
+        "room_type":               ss.get("rt"),
+        "property_type":           ss.get("pt"),
+        "host_response_time":      ss.get("resp_time"),
     }])
 
     price_pred  = float(np.expm1(price_model.predict(X_input)[0]))
@@ -539,7 +552,7 @@ if predict_btn or predict_inline or predict_top:
             st.caption("Moderate — check the calendar directly.")
 
 else:
-    st.info("👈 Paste a listing URL above — or fill in the sidebar — then click **Predict**.")
+    st.info("Paste a listing URL above and click **Predict** to check if it's fairly priced — or fill in the sidebar manually and click **Predict** to estimate any listing.")
 
 st.markdown("---")
 
