@@ -8,7 +8,7 @@ Predict the **nightly price** and **booking demand** of Amsterdam Airbnb listing
 
 ## Live App
 
-**[Open the Streamlit App →](https://share.streamlit.io)** *(link added after deployment)*
+**[Open the Streamlit App →](https://amsterdam-airbnb-predictor.streamlit.app)**
 
 ---
 
