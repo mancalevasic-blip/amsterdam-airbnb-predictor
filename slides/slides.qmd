@@ -1,0 +1,287 @@
+---
+title: "Amsterdam Airbnb Stay Value Predictor"
+subtitle: "Can we predict price and booking demand from listing features?"
+author: "Manca Levašič"
+date: "June 2026"
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    transition: fade
+    logo: ""
+    footer: "MADA Capstone · Amsterdam Airbnb · 2026"
+    chalkboard: false
+    highlight-style: github
+---
+
+## The Problem {background-color="#f0f4ff"}
+
+I am planning a trip to Amsterdam and I wanted to answer two questions every traveller has:
+
+::: {.incremental}
+- 💰 **Is this listing fairly priced?** *(regression)*
+- 📅 **Will it actually be available when I want to book?** *(classification)*
+:::
+
+. . .
+
+**Dataset:** Inside Airbnb Amsterdam — 10,480 listings, 79 columns, scraped September 2025.
+
+Public data · Creative Commons · No personal information.
+
+---
+
+## What We Built {background-color="#f0fff4"}
+
+::: {.columns}
+::: {.column width="50%"}
+### Offline (once)
+1. Download raw CSV
+2. Clean + engineer features
+3. Train two XGBoost models
+4. Save as `.pkl` files
+:::
+::: {.column width="50%"}
+### Live App (always on)
+1. Streamlit loads both models at startup
+2. User fills in listing details
+3. Models return: **price estimate + availability label**
+:::
+:::
+
+. . .
+
+> One pipeline. Two questions. One app.
+
+---
+
+## The Data
+
+::: {.columns}
+::: {.column width="60%"}
+**Raw → Clean:**
+
+| Step | Rows |
+|------|------|
+| Raw dataset | 10,480 |
+| Remove missing/zero price | −4,665 |
+| Cap outliers (>€992 = 99th %ile) | −few |
+| **Final** | **5,815** |
+
+**27 features** used for modelling:
+23 numeric · 4 categorical
+:::
+::: {.column width="40%"}
+**Key engineered features:**
+
+- `host_years` — from `host_since` date
+- `amenity_count` — length of amenities list
+- `review_composite` — mean of 6 review dimensions
+- `beds_per_person` — ratio
+- `multi_listing_host` — boolean flag
+:::
+:::
+
+---
+
+## No Data Leakage {background-color="#fff8e1"}
+
+::: {.callout-warning}
+## The #1 mistake in ML projects
+Fitting the scaler or encoder on *all* data before splitting inflates your score.
+You end up with a model that looks great but fails in production.
+:::
+
+. . .
+
+**How we avoided it:**
+
+- All preprocessing inside `sklearn Pipeline` — fitted on train data only
+- `availability_30/60/90/365` columns **dropped** from the feature set (they *are* the target)
+- Scalers/encoders re-fit inside each CV fold via `GridSearchCV`
+- Test set touched **exactly once** at the very end
+
+---
+
+## Model Ladder — Both Tasks
+
+We train 4 models per task, from simple to complex:
+
+| Step | Classification | Regression |
+|------|---------------|------------|
+| **Baseline** | DummyClassifier | DummyRegressor |
+| **Linear** | Logistic Regression | Ridge Regression |
+| **Tree** | Decision Tree | Decision Tree |
+| **XGBoost** | XGBClassifier ✅ | XGBRegressor ✅ |
+
+. . .
+
+> Always start with the baseline. A model that cannot beat Dummy is not done.
+
+---
+
+## Overfitting Demo
+
+A Decision Tree with **unlimited depth** memorises the training set:
+
+::: {.columns}
+::: {.column width="50%"}
+**Classification:**
+
+| | Train AUC | Val AUC |
+|---|---|---|
+| DT (unlimited) | **1.000** | 0.604 |
+| DT (depth = 5) | 0.68 | 0.636 |
+:::
+::: {.column width="50%"}
+**Regression:**
+
+| | Train R² | Val R² |
+|---|---|---|
+| DT (unlimited) | **1.000** | 0.165 |
+| DT (depth = 5) | 0.53 | 0.438 |
+:::
+:::
+
+. . .
+
+> Perfect on training data ≠ useful model. XGBoost controls this via regularisation (subsample, colsample, learning rate).
+
+---
+
+## XGBoost Tuning
+
+5-fold **cross-validation** + `GridSearchCV` over:
+
+```
+max_depth:     [3, 4]
+learning_rate: [0.05, 0.1]
+n_estimators:  [200, 300]
+```
+
+. . .
+
+**Best params found:**
+
+| Task | max_depth | lr | n_estimators |
+|------|-----------|-----|--------------|
+| Classification | 4 | 0.05 | 300 |
+| Regression | 4 | 0.10 | 200 |
+
+> Cross-validation gives a stable estimate of performance — averaged over 5 folds — instead of relying on one lucky split.
+
+---
+
+## Results — Classification {background-color="#fef2f2"}
+
+**Can we predict which listings have ≤ 90 free days/year?**
+
+| Model | Accuracy | F1 | **ROC-AUC** |
+|-------|----------|-----|------------|
+| Dummy (baseline) | 0.562 | 0.000 | 0.500 |
+| Logistic Regression | 0.623 | 0.536 | 0.655 |
+| Decision Tree (d=5) | 0.616 | 0.487 | 0.636 |
+| **XGBoost** | **0.647** | **0.565** | **0.698** |
+
+. . .
+
+> **AUC 0.70** — meaningfully better than random. The model captures real signal, but `low_availability` is a noisy proxy: hosts can block dates manually.
+
+---
+
+## Results — Regression {background-color="#f0fff4"}
+
+**Can we predict the nightly price?**
+
+| Model | **R²** | MAE | RMSE |
+|-------|--------|-----|------|
+| Dummy (baseline) | 0.000 | €100 | €147 |
+| Ridge Regression | 0.580 | €68 | €106 |
+| Decision Tree (d=5) | 0.438 | €77 | €115 |
+| **XGBoost** | **0.627** | **€63** | **€97** |
+
+. . .
+
+> **R² = 0.63, MAE = €63.** XGBoost explains 63% of price variance and is on average €63 off — useful for spotting under- or over-priced listings.
+
+---
+
+## What Drives Price?
+
+**Top predictors (XGBoost feature importance):**
+
+1. **Room type** — entire home vs private room is the biggest price driver
+2. **Accommodates** — more guests → higher price
+3. **Neighbourhood** — Centrum-West commands a premium
+4. **Amenity count** — well-equipped listings charge more
+5. **Review scores** — higher rated = higher priced
+
+. . .
+
+> These align with intuition — which is a good sign the model isn't learning noise.
+
+---
+
+## Limitations — Be Honest {background-color="#fff8e1"}
+
+::: {.callout-important}
+A model that cannot explain its failures is not trustworthy.
+:::
+
+- `low_availability` is a proxy, not pure demand — hosts can block dates
+- Prices above ~€300/night have sparse training data → uncertainty grows
+- One snapshot in time — no seasonal adjustment
+- Correlation ≠ causation: improving reviews does not automatically raise price
+- R² = 0.63 means **37% of price variation is unexplained** — useful, not magic
+
+---
+
+## The Live App
+
+A **Streamlit** web app where any user can:
+
+1. Fill in listing characteristics in a sidebar form
+2. Click **Predict**
+3. See: estimated nightly price + availability prediction + confidence bar
+
+. . .
+
+::: {.columns}
+::: {.column width="50%"}
+**Deployed at:**
+`share.streamlit.io` (link in README)
+:::
+::: {.column width="50%"}
+**Stack:**
+Python · scikit-learn · XGBoost · Streamlit · joblib
+:::
+:::
+
+---
+
+## Key Takeaways {background-color="#f0f4ff"}
+
+::: {.incremental}
+1. **Beat the baseline** — XGBoost beats DummyRegressor/DummyClassifier on both tasks ✅
+2. **No leakage** — all preprocessing inside Pipeline, test set untouched until the end ✅
+3. **Honest evaluation** — report limitations, do not oversell ✅
+4. **Deployed** — a real app anyone can use to compare Amsterdam listings ✅
+:::
+
+. . .
+
+> **The most useful insight:** Room type and neighbourhood explain most of the price — the same tools that data scientists use every day, applied to a dataset I actually care about.
+
+---
+
+## Thank You {background-color="#f0fff4"}
+
+**Manca Levašič · MADA Capstone 2026**
+
+Dataset: Inside Airbnb Amsterdam (CC-BY 4.0)
+
+GitHub repo · Live app · Full Quarto report
+
+. . .
+
+*Questions?*

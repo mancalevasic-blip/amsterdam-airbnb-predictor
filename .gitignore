@@ -1,0 +1,16 @@
+# Large data files — download with scripts/download_data.py
+data/raw/
+data/lookup.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+
+# macOS
+.DS_Store
+
+# Quarto outputs
+*.html
+_files/
+.quarto/
