@@ -537,6 +537,51 @@ else:
     st.info("👈 Paste a listing URL above — or fill in the sidebar — then click **Predict**.")
 
 st.markdown("---")
+
+st.markdown("### 🌷 Explore Amsterdam")
+st.markdown("Planning a trip or curious about the market? Here are some useful resources.")
+
+_col1, _col2, _col3 = st.columns(3)
+with _col1:
+    st.markdown(
+        "**🏠 Browse Airbnbs**\n\n"
+        "Search all Amsterdam listings directly on Airbnb — filter by neighbourhood, dates, and price.\n\n"
+        "[Open on Airbnb →](https://www.airbnb.com/s/Amsterdam--Netherlands/homes)"
+    )
+with _col2:
+    st.markdown(
+        "**📊 Inside Airbnb Data**\n\n"
+        "The open dataset powering this app. Includes an interactive map of all Amsterdam listings.\n\n"
+        "[Explore the data →](https://insideairbnb.com/amsterdam/)"
+    )
+with _col3:
+    st.markdown(
+        "**🗺️ Amsterdam Neighbourhoods**\n\n"
+        "Official Amsterdam tourism guide — where to stay, what each area feels like, and tips.\n\n"
+        "[Visit I Amsterdam →](https://www.iamsterdam.com/en/plan-your-trip/where-to-stay)"
+    )
+
+_col4, _col5, _col6 = st.columns(3)
+with _col4:
+    st.markdown(
+        "**🍺 What to Do & See**\n\n"
+        "Time Out's curated guide to Amsterdam — neighbourhoods, restaurants, museums, and more.\n\n"
+        "[Time Out Amsterdam →](https://www.timeout.com/amsterdam)"
+    )
+with _col5:
+    st.markdown(
+        "**🚲 Getting Around**\n\n"
+        "GVB is Amsterdam's public transport. Plan your route between neighbourhoods by tram, metro, or ferry.\n\n"
+        "[GVB Journey Planner →](https://www.gvb.nl/en)"
+    )
+with _col6:
+    st.markdown(
+        "**🌐 Amsterdam City Info**\n\n"
+        "Official City of Amsterdam portal — events, districts, regulations, and visitor information.\n\n"
+        "[amsterdam.nl →](https://www.amsterdam.nl/en/)"
+    )
+
+st.markdown("---")
 st.caption("Manca Levašič · MADA Capstone 2025 · "
            "Data: [Inside Airbnb](https://insideairbnb.com/) (CC-BY 4.0) · "
            "Models: scikit-learn + XGBoost")
