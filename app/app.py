@@ -142,6 +142,13 @@ if st.session_state.pop("reset_pending", False):
     st.session_state.lookup_error  = None
 
 # ── URL lookup helpers ─────────────────────────────────────────────────────────
+def _on_key_field_change():
+    """Clear the listed-price comparison whenever the user edits a key field."""
+    if st.session_state.get("prefill_snap") is not None:
+        st.session_state.listed_price = None
+        st.session_state.prefill_snap = None
+        st.session_state.listing_name = None
+
 def _safe(row, col, default):
     v = row.get(col, default)
     return default if pd.isna(v) else v
@@ -265,6 +272,7 @@ with st.sidebar:
         NEIGHBOURHOODS, key="nb",
         index=None, placeholder="Select a neighbourhood…",
         help="The area of Amsterdam the listing is in. This is one of the strongest price predictors.",
+        on_change=_on_key_field_change,
     )
 
     with st.popover("🗺️ Pick on map", use_container_width=True):
@@ -286,6 +294,7 @@ with st.sidebar:
         help="Entire home/apt = you have the whole place to yourself. "
              "Private room = your own room, shared common areas. "
              "Shared room = you share a bedroom with others.",
+        on_change=_on_key_field_change,
     )
     property_type = st.selectbox(
         "Property type", PROP_TYPES, key="pt",
@@ -299,10 +308,13 @@ with st.sidebar:
     accommodates = st.slider(
         "Accommodates (guests)", 1, 16, key="accommodates",
         help="Maximum number of guests the listing fits.",
+        on_change=_on_key_field_change,
     )
-    bedrooms = st.number_input("Bedrooms",  0, 10, key="bedrooms")
+    bedrooms = st.number_input("Bedrooms",  0, 10, key="bedrooms",
+                               on_change=_on_key_field_change)
     beds     = st.number_input("Beds",      1, 16, key="beds",
-                               help="Number of actual beds (can be more than bedrooms — e.g. sofa bed).")
+                               help="Number of actual beds (can be more than bedrooms — e.g. sofa bed).",
+                               on_change=_on_key_field_change)
     bathrooms = st.number_input("Bathrooms", 0.5, 6.0, step=0.5, key="bathrooms")
     amenity_count = st.slider(
         "Number of amenities", 0, 100, key="amenity_count",
@@ -316,6 +328,7 @@ with st.sidebar:
         "Minimum nights", 1, 365, key="minimum_nights",
         help="The shortest stay the host accepts. Many hosts set 2–3 nights. "
              "High minimums (e.g. 30 nights) reduce short-term bookings and affect availability.",
+        on_change=_on_key_field_change,
     )
     maximum_nights = st.number_input(
         "Maximum nights", 1, 1125, key="maximum_nights",
@@ -400,18 +413,6 @@ with st.sidebar:
     predict_btn = st.button("🔮 Predict", use_container_width=True,
                             type="primary", key="sidebar_predict")
 
-# ── Auto-clear listed_price when user edits key fields ────────────────────────
-# No rerun needed — just wipe listed_price so the comparison doesn't show.
-snap = st.session_state.prefill_snap
-if snap and st.session_state.listed_price is not None:
-    if (neighbourhood    != snap["nb"]           or
-            room_type    != snap["rt"]           or
-            int(accommodates)   != snap["accommodates"] or
-            int(bedrooms)       != snap["bedrooms"]     or
-            int(beds)           != snap["beds"]         or
-            int(minimum_nights) != snap["minimum_nights"]):
-        st.session_state.listed_price = None
-        st.session_state.prefill_snap = None
 
 # ── Description ───────────────────────────────────────────────────────────────
 st.markdown(
