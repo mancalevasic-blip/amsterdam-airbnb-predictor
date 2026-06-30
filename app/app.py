@@ -210,7 +210,7 @@ def do_clear():
 # ── Main area ─────────────────────────────────────────────────────────────────
 st.title("🏠 Amsterdam Airbnb Stay Value Predictor")
 
-col_url, col_look, col_clr = st.columns([5, 1, 1])
+col_url, col_look, col_clr, col_pred = st.columns([5, 1, 1, 1])
 with col_url:
     url_input = st.text_input(
         "Paste an Airbnb listing URL to auto-fill:",
@@ -224,6 +224,10 @@ with col_look:
 with col_clr:
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("✕ Clear", use_container_width=True, on_click=do_clear)
+with col_pred:
+    st.markdown("<br>", unsafe_allow_html=True)
+    predict_top = st.button("🔮 Predict", use_container_width=True,
+                            type="primary", key="top_predict")
 
 if st.session_state.lookup_error:
     st.warning(st.session_state.lookup_error)
@@ -433,7 +437,7 @@ with st.expander("🔬 How the models work", expanded=False):
     """)
 
 # ── Prediction ────────────────────────────────────────────────────────────────
-if predict_btn or predict_inline:
+if predict_btn or predict_inline or predict_top:
     # NaN for unset/unknown fields → SimpleImputer fills median/most_frequent
     r_scores = [review_scores_rating, review_scores_cleanliness, review_scores_location]
     review_composite = float(np.nanmean(r_scores)) if not all(np.isnan(v) if isinstance(v, float) else False for v in r_scores) else np.nan
