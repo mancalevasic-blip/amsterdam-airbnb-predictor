@@ -122,9 +122,23 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Apply a pending map-click before any widget renders, so setting nb is legal
+# Apply pending actions before any widget renders (Streamlit requires this)
 if st.session_state.get("map_nb_pending"):
     st.session_state.nb = st.session_state.pop("map_nb_pending")
+
+if st.session_state.pop("reset_pending", False):
+    WIDGET_KEYS = ["nb","rt","pt","accommodates","bedrooms","beds","bathrooms",
+                   "amenity_count","minimum_nights","maximum_nights","instant_bookable",
+                   "number_of_reviews","number_of_reviews_ltm","reviews_per_month",
+                   "review_scores_rating","review_scores_cleanliness","review_scores_location",
+                   "host_is_superhost","host_identity_verified","host_years",
+                   "host_response_rate","host_acceptance_rate","resp_time","host_listings"]
+    for k in WIDGET_KEYS:
+        st.session_state[k] = DEFAULTS[k]
+    st.session_state.listed_price  = None
+    st.session_state.listing_name  = None
+    st.session_state.prefill_snap  = None
+    st.session_state.lookup_error  = None
 
 # ── URL lookup helpers ─────────────────────────────────────────────────────────
 def _safe(row, col, default):
@@ -231,6 +245,13 @@ st.markdown("---")
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("Listing Details")
+
+    def _request_reset():
+        st.session_state.reset_pending = True
+
+    st.button("↺ Reset listing details", use_container_width=True,
+              on_click=_request_reset)
+    st.markdown("---")
 
     st.subheader("📍 Location & Type")
     # All widgets use key= — Streamlit owns the value, no manual default logic needed
