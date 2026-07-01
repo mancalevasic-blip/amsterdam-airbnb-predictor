@@ -114,6 +114,7 @@ RESP_TIMES     = ["within an hour", "within a few hours", "within a day", "a few
 
 # ── Session state defaults (only set once on first load) ───────────────────────
 DEFAULTS = dict(
+    url_input="",
     nb=None, rt=None, pt=None,
     accommodates=2, bedrooms=1, beds=1, bathrooms=1.0, amenity_count=30,
     minimum_nights=2, maximum_nights=365, instant_bookable=False,
@@ -167,6 +168,9 @@ def do_lookup(url: str):
     m = re.search(r"airbnb\.[a-z.]+/rooms/(\d+)", url)
     if not m:
         st.session_state.lookup_error = "Could not parse a listing ID from that URL."
+        st.session_state.listed_price = None
+        st.session_state.listing_name = None
+        st.session_state.prefill_snap = None
         return
     lid = int(m.group(1))
     row = lookup_df[lookup_df["id"] == lid]
@@ -175,6 +179,9 @@ def do_lookup(url: str):
             f"Listing #{lid} is not in our dataset (scraped Sept 2025). "
             "Fill in details manually below."
         )
+        st.session_state.listed_price = None
+        st.session_state.listing_name = None
+        st.session_state.prefill_snap = None
         return
 
     r = row.iloc[0]
@@ -233,6 +240,7 @@ with col_url:
         "Paste an Airbnb listing URL — or fill in the sidebar — then hit Predict:",
         placeholder="https://www.airbnb.com/rooms/12345678",
         label_visibility="visible",
+        key="url_input",
     )
 with col_pred:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -244,8 +252,11 @@ with col_clr:
 
 # If Predict was clicked with a URL, do the lookup NOW — before sidebar renders —
 # so the sidebar widgets pick up the fresh session-state values this same rerun.
+_lookup_blocked = False
 if predict_clicked and url_input.strip():
     do_lookup(url_input.strip())
+    if st.session_state.lookup_error:
+        _lookup_blocked = True  # listing not found → block prediction
 
 if st.session_state.lookup_error:
     st.warning(st.session_state.lookup_error)
@@ -438,7 +449,7 @@ with st.expander("🔬 How the models work", expanded=False):
     """)
 
 # ── Prediction ────────────────────────────────────────────────────────────────
-if predict_clicked:
+if predict_clicked and not _lookup_blocked:
     # Always read from session state so that a same-click URL lookup is reflected
     ss = st.session_state
     _no_ratings    = ss.get("no_ratings", False)
