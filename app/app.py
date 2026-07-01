@@ -167,6 +167,16 @@ for k, v in DEFAULTS.items():
 if st.session_state.get("map_nb_pending"):
     st.session_state.nb = st.session_state.pop("map_nb_pending")
 
+if st.session_state.get("_lookup_prefill"):
+    for k, v in st.session_state.pop("_lookup_prefill").items():
+        st.session_state[k] = v
+    st.session_state.prefill_snap = dict(
+        nb=st.session_state.nb, rt=st.session_state.rt,
+        accommodates=st.session_state.accommodates,
+        bedrooms=st.session_state.bedrooms, beds=st.session_state.beds,
+        minimum_nights=st.session_state.minimum_nights,
+    )
+
 if st.session_state.pop("clear_pending", False):
     for k, v in DEFAULTS.items():
         st.session_state[k] = v
@@ -220,42 +230,44 @@ def do_lookup(url: str):
     nb = _safe(r, "neighbourhood_cleansed", NEIGHBOURHOODS[0])
     rt = _safe(r, "room_type", ROOM_TYPES[0])
     pt = _safe(r, "property_type", PROP_TYPES[0])
-    st.session_state.nb  = nb if nb in NEIGHBOURHOODS else NEIGHBOURHOODS[0]
-    st.session_state.rt  = rt if rt in ROOM_TYPES     else ROOM_TYPES[0]
-    st.session_state.pt  = pt if pt in PROP_TYPES      else PROP_TYPES[0]
-    st.session_state.accommodates         = int(_safe(r, "accommodates", 2))
-    st.session_state.bedrooms             = int(_safe(r, "bedrooms", 1))
-    st.session_state.beds                 = int(_safe(r, "beds", 1))
-    st.session_state.bathrooms            = float(_safe(r, "bathrooms", 1.0))
-    st.session_state.amenity_count        = int(_safe(r, "amenity_count", 30))
-    st.session_state.minimum_nights       = int(_safe(r, "minimum_nights", 2))
-    st.session_state.maximum_nights       = int(_safe(r, "maximum_nights", 365))
-    st.session_state.instant_bookable     = bool(_safe(r, "instant_bookable", 0))
-    st.session_state.number_of_reviews    = int(_safe(r, "number_of_reviews", 20))
-    st.session_state.number_of_reviews_ltm= int(_safe(r, "number_of_reviews_ltm", 5))
-    st.session_state.reviews_per_month    = float(_safe(r, "reviews_per_month", 0.5))
-    st.session_state.review_scores_rating      = float(_safe(r, "review_scores_rating", 4.5))
-    st.session_state.review_scores_cleanliness = float(_safe(r, "review_scores_cleanliness", 4.5))
-    st.session_state.review_scores_location    = float(_safe(r, "review_scores_location", 4.8))
-    st.session_state.host_is_superhost    = bool(_safe(r, "host_is_superhost", 0))
-    st.session_state.host_identity_verified = bool(_safe(r, "host_identity_verified", 1))
-    st.session_state.host_years           = float(_safe(r, "host_years", 3.0))
-    st.session_state.host_response_rate   = int(_safe(r, "host_response_rate", 90))
-    st.session_state.host_acceptance_rate = int(_safe(r, "host_acceptance_rate", 80))
     rtime = _safe(r, "host_response_time", RESP_TIMES[0])
-    st.session_state.resp_time  = rtime if rtime in RESP_TIMES else RESP_TIMES[0]
-    st.session_state.host_listings = int(_safe(r, "calculated_host_listings_count", 1))
 
+    # Widget-backed keys cannot be set after widgets render — store in pending dict
+    # and apply at the top of the next rerun before any widgets instantiate.
+    st.session_state._lookup_prefill = dict(
+        nb  = nb if nb in NEIGHBOURHOODS else NEIGHBOURHOODS[0],
+        rt  = rt if rt in ROOM_TYPES     else ROOM_TYPES[0],
+        pt  = pt if pt in PROP_TYPES     else PROP_TYPES[0],
+        accommodates          = int(_safe(r, "accommodates", 2)),
+        bedrooms              = int(_safe(r, "bedrooms", 1)),
+        beds                  = int(_safe(r, "beds", 1)),
+        bathrooms             = float(_safe(r, "bathrooms", 1.0)),
+        amenity_count         = int(_safe(r, "amenity_count", 30)),
+        minimum_nights        = int(_safe(r, "minimum_nights", 2)),
+        maximum_nights        = int(_safe(r, "maximum_nights", 365)),
+        instant_bookable      = bool(_safe(r, "instant_bookable", 0)),
+        number_of_reviews     = int(_safe(r, "number_of_reviews", 20)),
+        number_of_reviews_ltm = int(_safe(r, "number_of_reviews_ltm", 5)),
+        reviews_per_month     = float(_safe(r, "reviews_per_month", 0.5)),
+        review_scores_rating      = float(_safe(r, "review_scores_rating", 4.5)),
+        review_scores_cleanliness = float(_safe(r, "review_scores_cleanliness", 4.5)),
+        review_scores_location    = float(_safe(r, "review_scores_location", 4.8)),
+        host_is_superhost     = bool(_safe(r, "host_is_superhost", 0)),
+        host_identity_verified= bool(_safe(r, "host_identity_verified", 1)),
+        host_years            = float(_safe(r, "host_years", 3.0)),
+        host_response_rate    = int(_safe(r, "host_response_rate", 90)),
+        host_acceptance_rate  = int(_safe(r, "host_acceptance_rate", 80)),
+        resp_time             = rtime if rtime in RESP_TIMES else RESP_TIMES[0],
+        host_listings         = int(_safe(r, "calculated_host_listings_count", 1)),
+    )
+
+    # These are not widget-backed — safe to set directly
     price = _safe(r, "price_numeric", None)
     st.session_state.listed_price = float(price) if price and not pd.isna(price) else None
     st.session_state.listing_name = _safe(r, "name", "Listing")
     st.session_state.lookup_error = None
-    st.session_state.prefill_snap = dict(
-        nb=st.session_state.nb, rt=st.session_state.rt,
-        accommodates=st.session_state.accommodates,
-        bedrooms=st.session_state.bedrooms, beds=st.session_state.beds,
-        minimum_nights=st.session_state.minimum_nights,
-    )
+    st.session_state._predict_url_pending = True
+    st.rerun()
 
 # ── Sidebar (always visible, independent of tabs) ─────────────────────────────
 with st.sidebar:
@@ -417,6 +429,9 @@ with tab_pred:
     predict_url_btn = False
     _lookup_blocked = False
     _show_comparison = False
+    _predict_url_pending = st.session_state.pop("_predict_url_pending", False)
+    if _predict_url_pending:
+        _show_comparison = st.session_state.listed_price is not None
 
     st.markdown("**Option 1 — Paste an Airbnb URL to check if it's fairly priced:**")
     with st.form("url_form", clear_on_submit=False):
@@ -441,11 +456,11 @@ with tab_pred:
 
     if predict_url_btn:
         if url_input.strip():
+            # do_lookup sets _lookup_prefill + _predict_url_pending and calls st.rerun() on success,
+            # or sets lookup_error directly on failure (no rerun needed).
             do_lookup(url_input.strip())
-            if st.session_state.lookup_error:
-                _lookup_blocked = True
-            else:
-                _show_comparison = True
+            # Reaches here only on failure (rerun was not called)
+            _lookup_blocked = True
         else:
             st.info("Paste an Airbnb listing URL above, then click **Predict from URL**. "
                     "Or use **🔮 Predict manual listing** in the left sidebar.")
@@ -480,7 +495,7 @@ with tab_pred:
         | Availability classification | ROC-AUC | 0.50 | **0.70** |
         """)
 
-    if (predict_url_btn and not _lookup_blocked) or predict_manual_btn:
+    if (predict_url_btn and not _lookup_blocked) or predict_manual_btn or _predict_url_pending:
         ss = st.session_state
         _no_ratings    = ss.get("no_ratings", False)
         _unknown_rates = ss.get("unknown_rates", False)
