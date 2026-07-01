@@ -234,34 +234,47 @@ def do_clear():
 # ── Main area ─────────────────────────────────────────────────────────────────
 st.title("🏠 Amsterdam Airbnb Stay Value Predictor")
 
-col_url, col_pred, col_clr = st.columns([5, 1, 1])
-with col_url:
-    url_input = st.text_input(
-        "Paste an Airbnb listing URL — or fill in the sidebar — then hit Predict:",
-        placeholder="https://www.airbnb.com/rooms/12345678",
-        label_visibility="visible",
-        key="url_input",
-    )
-with col_pred:
-    st.markdown("<br>", unsafe_allow_html=True)
-    predict_clicked = st.button("🔮 Predict", use_container_width=True,
-                                type="primary", key="main_predict")
-with col_clr:
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.button("✕ Clear", use_container_width=True, on_click=do_clear)
+# ── Option 1: URL lookup (wrapped in a form so Enter submits and no "Press Enter to apply" hint appears)
+st.markdown("**Option 1 — Paste an Airbnb URL to check if it's fairly priced:**")
+with st.form("url_form", clear_on_submit=False):
+    col_url, col_pred, col_clr = st.columns([5, 1.4, 1])
+    with col_url:
+        url_input = st.text_input(
+            "URL",
+            placeholder="https://www.airbnb.com/rooms/12345678",
+            label_visibility="collapsed",
+            key="url_input",
+        )
+    with col_pred:
+        predict_url_btn = st.form_submit_button(
+            "🔮 Predict from URL", type="primary", use_container_width=True
+        )
+    with col_clr:
+        clear_btn = st.form_submit_button("✕ Clear", use_container_width=True)
 
-# If Predict was clicked with a URL, do the lookup NOW — before sidebar renders —
-# so the sidebar widgets pick up the fresh session-state values this same rerun.
+# Handle Clear (must rerun so the emptied url_input key takes effect in the widget)
+if clear_btn:
+    do_clear()
+    st.rerun()
+
+# Handle URL predict — lookup BEFORE sidebar renders so sidebar picks up fresh values
 _lookup_blocked = False
-if predict_clicked and url_input.strip():
-    do_lookup(url_input.strip())
-    if st.session_state.lookup_error:
-        _lookup_blocked = True  # listing not found → block prediction
+_show_comparison = False
+if predict_url_btn:
+    if url_input.strip():
+        do_lookup(url_input.strip())
+        if st.session_state.lookup_error:
+            _lookup_blocked = True
+        else:
+            _show_comparison = True
+    else:
+        st.info("Paste an Airbnb listing URL above, then click **Predict from URL**. "
+                "Or use **🔮 Predict manual listing** in the left sidebar.")
 
 if st.session_state.lookup_error:
     st.warning(st.session_state.lookup_error)
 
-# Banner — shown whenever a listing was matched (and user hasn't cleared it)
+# Banner — shown when a listing was matched via URL
 if st.session_state.listed_price is not None:
     st.success(f"**Found:** {st.session_state.listing_name} · €{st.session_state.listed_price:.0f}/night")
 
@@ -423,6 +436,13 @@ with st.sidebar:
              "Professional hosts with many listings behave differently from occasional renters.",
     )
 
+    st.markdown("---")
+    st.markdown("**Option 2 — Predict any hypothetical listing:**")
+    st.caption("Uses the values above. No URL needed — no listed-price comparison.")
+    predict_manual_btn = st.button(
+        "🔮 Predict manual listing",
+        use_container_width=True, type="primary", key="manual_predict",
+    )
 
 
 # ── Description ───────────────────────────────────────────────────────────────
@@ -449,7 +469,7 @@ with st.expander("🔬 How the models work", expanded=False):
     """)
 
 # ── Prediction ────────────────────────────────────────────────────────────────
-if predict_clicked and not _lookup_blocked:
+if (predict_url_btn and not _lookup_blocked) or predict_manual_btn:
     # Always read from session state so that a same-click URL lookup is reflected
     ss = st.session_state
     _no_ratings    = ss.get("no_ratings", False)
@@ -503,7 +523,8 @@ if predict_clicked and not _lookup_blocked:
     st.markdown("---")
     st.subheader("📊 Prediction Results")
 
-    listed = st.session_state.listed_price   # None if user edited / cleared
+    # Only show listed-price comparison in URL mode; manual mode has no real price
+    listed = st.session_state.listed_price if _show_comparison else None
 
     if listed is not None:
         diff     = listed - price_pred
@@ -563,7 +584,8 @@ if predict_clicked and not _lookup_blocked:
             st.caption("Moderate — check the calendar directly.")
 
 else:
-    st.info("Paste a listing URL above and click **Predict** to check if it's fairly priced — or fill in the sidebar manually and click **Predict** to estimate any listing.")
+    st.info("**Option 1:** Paste an Airbnb URL above and click **Predict from URL** to check if it's fairly priced against our model.  \n"
+            "**Option 2:** Fill in the sidebar and click **🔮 Predict manual listing** to estimate any hypothetical listing.")
 
 st.markdown("---")
 
