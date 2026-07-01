@@ -158,6 +158,7 @@ DEFAULTS = dict(
     prefill_snap=None,
     lookup_error=None,
     map_nb=None,
+    _tried_predict=False,
 )
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -190,10 +191,11 @@ if st.session_state.pop("reset_pending", False):
                    "host_response_rate","host_acceptance_rate","resp_time","host_listings"]
     for k in WIDGET_KEYS:
         st.session_state[k] = DEFAULTS[k]
-    st.session_state.listed_price  = None
-    st.session_state.listing_name  = None
-    st.session_state.prefill_snap  = None
-    st.session_state.lookup_error  = None
+    st.session_state.listed_price   = None
+    st.session_state.listing_name   = None
+    st.session_state.prefill_snap   = None
+    st.session_state.lookup_error   = None
+    st.session_state._tried_predict = False
 
 # ── URL lookup helpers ─────────────────────────────────────────────────────────
 def _on_key_field_change():
@@ -270,6 +272,15 @@ def do_lookup(url: str):
     st.rerun()
 
 # ── Sidebar (always visible, independent of tabs) ─────────────────────────────
+_val = st.session_state.get("_tried_predict", False)  # shorthand for validation messages
+
+def _req_msg(key):
+    if _val and not st.session_state.get(key):
+        st.markdown(
+            '<p style="color:#e53e3e;font-size:0.8em;margin:-8px 0 4px 0">⚠ This field is required</p>',
+            unsafe_allow_html=True,
+        )
+
 with st.sidebar:
     st.title("Listing Details")
 
@@ -277,140 +288,142 @@ with st.sidebar:
         st.session_state.reset_pending = True
 
     st.button("↺ Reset listing details", use_container_width=True, on_click=_request_reset)
-    st.markdown("---")
 
-    st.subheader("📍 Location & Type")
-    neighbourhood = st.selectbox(
-        "Neighbourhood", NEIGHBOURHOODS, key="nb",
-        index=None, placeholder="Select a neighbourhood…",
-        help="The area of Amsterdam the listing is in. This is one of the strongest price predictors.",
-        on_change=_on_key_field_change,
-    )
-    with st.popover("🗺️ Pick on map", use_container_width=True):
-        st.caption("Size = listing count · Colour = median price")
-        map_event = st.plotly_chart(
-            make_map(st.session_state.nb or "", neigh_stats),
-            use_container_width=True, on_select="rerun",
-            selection_mode="points", key="neigh_map",
+    with st.expander("📍 Location & Type", expanded=True):
+        neighbourhood = st.selectbox(
+            "Neighbourhood", NEIGHBOURHOODS, key="nb",
+            index=None, placeholder="Select a neighbourhood…",
+            help="The area of Amsterdam the listing is in. This is one of the strongest price predictors.",
+            on_change=_on_key_field_change,
         )
-        if map_event and map_event.selection and map_event.selection.points:
-            clicked = map_event.selection.points[0].get("customdata")
-            if clicked and clicked in NEIGHBOURHOODS:
-                st.session_state.map_nb_pending = clicked
-                st.rerun()
-    room_type = st.selectbox(
-        "Room type", ROOM_TYPES, key="rt",
-        index=None, placeholder="Select a room type…",
-        help="Entire home/apt = you have the whole place to yourself. "
-             "Private room = your own room, shared common areas. "
-             "Shared room = you share a bedroom with others.",
-        on_change=_on_key_field_change,
-    )
-    property_type = st.selectbox(
-        "Property type", PROP_TYPES, key="pt",
-        index=None, placeholder="Select a property type…",
-        help="The specific type of property — e.g. apartment, house, boat. "
-             "Less important than room type for pricing.",
-    )
-
-    st.subheader("🏠 Property")
-    accommodates = st.slider(
-        "Accommodates (guests)", 1, 16, key="accommodates",
-        help="Maximum number of guests the listing fits.",
-        on_change=_on_key_field_change,
-    )
-    bedrooms = st.number_input("Bedrooms", 0, 10, key="bedrooms", on_change=_on_key_field_change)
-    beds     = st.number_input("Beds",     1, 16, key="beds",
-                               help="Number of actual beds (can be more than bedrooms — e.g. sofa bed).",
-                               on_change=_on_key_field_change)
-    bathrooms     = st.number_input("Bathrooms", 0.5, 6.0, step=0.5, key="bathrooms")
-    amenity_count = st.slider(
-        "Number of amenities", 0, 100, key="amenity_count",
-        help="Total count of listed amenities — things like WiFi, kitchen, washing machine, "
-             "air conditioning, TV, etc. More amenities generally means a higher price.",
-    )
-
-    st.subheader("📅 Booking Rules")
-    minimum_nights = st.number_input(
-        "Minimum nights", 1, 365, key="minimum_nights",
-        help="The shortest stay the host accepts. Many hosts set 2–3 nights. "
-             "High minimums (e.g. 30 nights) reduce short-term bookings and affect availability.",
-        on_change=_on_key_field_change,
-    )
-    maximum_nights = st.number_input(
-        "Maximum nights", 1, 1125, key="maximum_nights",
-        help="The longest stay allowed. Most listings set this to 365 (no limit). "
-             "A low cap can mean the host is not renting long-term.",
-    )
-    instant_bookable = st.checkbox(
-        "Instant bookable", key="instant_bookable",
-        help="If ticked, guests can book immediately without waiting for host approval. "
-             "Instant-bookable listings tend to get more bookings.",
-    )
-
-    st.subheader("⭐ Reviews")
-    number_of_reviews = st.number_input(
-        "Total reviews", 0, 2000, key="number_of_reviews",
-        help="Total number of guest reviews since the listing was created. "
-             "More reviews = more booking history, which the model uses as a signal.",
-    )
-    number_of_reviews_ltm = st.number_input(
-        "Reviews (last 12 months)", 0, 500, key="number_of_reviews_ltm",
-        help="Reviews in the last 12 months. A better signal of current popularity than total reviews.",
-    )
-    reviews_per_month = st.number_input(
-        "Reviews per month", 0.0, 30.0, step=0.1, key="reviews_per_month",
-        help="Average reviews per month over the listing's lifetime. Roughly 50% of stays result "
-             "in a review, so multiply by ~2 to estimate actual monthly bookings.",
-    )
-    no_ratings = st.checkbox(
-        "No ratings yet (new listing)", key="no_ratings",
-        help="Tick this if the listing has no review scores yet. "
-             "The model will use typical Amsterdam values instead.",
-    )
-    if not no_ratings:
-        review_scores_rating      = st.slider("Overall rating (1–5)",  1.0, 5.0, step=0.1, key="review_scores_rating")
-        review_scores_cleanliness = st.slider("Cleanliness (1–5)",     1.0, 5.0, step=0.1, key="review_scores_cleanliness")
-        review_scores_location    = st.slider("Location (1–5)",        1.0, 5.0, step=0.1, key="review_scores_location")
-    else:
-        st.caption("Ratings will be estimated from the dataset average.")
-        review_scores_rating = review_scores_cleanliness = review_scores_location = np.nan
-
-    st.subheader("👤 Host")
-    host_is_superhost = st.checkbox(
-        "Superhost", key="host_is_superhost",
-        help="Superhosts are experienced hosts with high ratings and fast response times. "
-             "Airbnb awards this badge automatically based on performance.",
-    )
-    host_identity_verified = st.checkbox("Identity verified", key="host_identity_verified",
-                                         help="Host has verified their ID with Airbnb.")
-    host_years = st.slider(
-        "Years hosting", 0.0, 20.0, step=0.5, key="host_years",
-        help="How long the host has been on Airbnb. Calculated from their join date.",
-    )
-    unknown_rates = st.checkbox(
-        "Host rates not shown / unknown", key="unknown_rates",
-        help="Tick if response rate or acceptance rate aren't visible on the listing. "
-             "The model will use typical host values.",
-    )
-    if not unknown_rates:
-        host_response_rate   = st.slider("Response rate (%)",   0, 100, key="host_response_rate",
-                                         help="% of enquiries the host responds to.")
-        host_acceptance_rate = st.slider("Acceptance rate (%)", 0, 100, key="host_acceptance_rate",
-                                         help="% of booking requests the host accepts.")
-        host_response_time   = st.selectbox(
-            "Response time", RESP_TIMES, key="resp_time",
-            help="How quickly the host typically replies to messages.",
+        _req_msg("nb")
+        with st.popover("🗺️ Pick on map", use_container_width=True):
+            st.caption("Size = listing count · Colour = median price")
+            map_event = st.plotly_chart(
+                make_map(st.session_state.nb or "", neigh_stats),
+                use_container_width=True, on_select="rerun",
+                selection_mode="points", key="neigh_map",
+            )
+            if map_event and map_event.selection and map_event.selection.points:
+                clicked = map_event.selection.points[0].get("customdata")
+                if clicked and clicked in NEIGHBOURHOODS:
+                    st.session_state.map_nb_pending = clicked
+                    st.rerun()
+        room_type = st.selectbox(
+            "Room type", ROOM_TYPES, key="rt",
+            index=None, placeholder="Select a room type…",
+            help="Entire home/apt = you have the whole place to yourself. "
+                 "Private room = your own room, shared common areas. "
+                 "Shared room = you share a bedroom with others.",
+            on_change=_on_key_field_change,
         )
-    else:
-        st.caption("Host rates will be estimated from the dataset average.")
-        host_response_rate = host_acceptance_rate = np.nan
-        host_response_time = "within a few hours"
-    calculated_host_listings_count = st.number_input(
-        "Host's total listings", 1, 200, key="host_listings",
-        help="How many listings this host manages on Airbnb. "
-             "Professional hosts with many listings behave differently from occasional renters.",
-    )
+        _req_msg("rt")
+        property_type = st.selectbox(
+            "Property type", PROP_TYPES, key="pt",
+            index=None, placeholder="Select a property type…",
+            help="The specific type of property — e.g. apartment, house, boat. "
+                 "Less important than room type for pricing.",
+        )
+        _req_msg("pt")
+
+    with st.expander("🏠 Property", expanded=False):
+        accommodates = st.slider(
+            "Accommodates (guests)", 1, 16, key="accommodates",
+            help="Maximum number of guests the listing fits.",
+            on_change=_on_key_field_change,
+        )
+        bedrooms = st.number_input("Bedrooms", 0, 10, key="bedrooms", on_change=_on_key_field_change)
+        beds     = st.number_input("Beds",     1, 16, key="beds",
+                                   help="Number of actual beds (can be more than bedrooms — e.g. sofa bed).",
+                                   on_change=_on_key_field_change)
+        bathrooms     = st.number_input("Bathrooms", 0.5, 6.0, step=0.5, key="bathrooms")
+        amenity_count = st.slider(
+            "Number of amenities", 0, 100, key="amenity_count",
+            help="Total count of listed amenities — things like WiFi, kitchen, washing machine, "
+                 "air conditioning, TV, etc. More amenities generally means a higher price.",
+        )
+
+    with st.expander("📅 Booking Rules", expanded=False):
+        minimum_nights = st.number_input(
+            "Minimum nights", 1, 365, key="minimum_nights",
+            help="The shortest stay the host accepts. Many hosts set 2–3 nights. "
+                 "High minimums (e.g. 30 nights) reduce short-term bookings and affect availability.",
+            on_change=_on_key_field_change,
+        )
+        maximum_nights = st.number_input(
+            "Maximum nights", 1, 1125, key="maximum_nights",
+            help="The longest stay allowed. Most listings set this to 365 (no limit). "
+                 "A low cap can mean the host is not renting long-term.",
+        )
+        instant_bookable = st.checkbox(
+            "Instant bookable", key="instant_bookable",
+            help="If ticked, guests can book immediately without waiting for host approval. "
+                 "Instant-bookable listings tend to get more bookings.",
+        )
+
+    with st.expander("⭐ Reviews", expanded=False):
+        number_of_reviews = st.number_input(
+            "Total reviews", 0, 2000, key="number_of_reviews",
+            help="Total number of guest reviews since the listing was created. "
+                 "More reviews = more booking history, which the model uses as a signal.",
+        )
+        number_of_reviews_ltm = st.number_input(
+            "Reviews (last 12 months)", 0, 500, key="number_of_reviews_ltm",
+            help="Reviews in the last 12 months. A better signal of current popularity than total reviews.",
+        )
+        reviews_per_month = st.number_input(
+            "Reviews per month", 0.0, 30.0, step=0.1, key="reviews_per_month",
+            help="Average reviews per month over the listing's lifetime. Roughly 50% of stays result "
+                 "in a review, so multiply by ~2 to estimate actual monthly bookings.",
+        )
+        no_ratings = st.checkbox(
+            "No ratings yet (new listing)", key="no_ratings",
+            help="Tick this if the listing has no review scores yet. "
+                 "The model will use typical Amsterdam values instead.",
+        )
+        if not no_ratings:
+            review_scores_rating      = st.slider("Overall rating (1–5)",  1.0, 5.0, step=0.1, key="review_scores_rating")
+            review_scores_cleanliness = st.slider("Cleanliness (1–5)",     1.0, 5.0, step=0.1, key="review_scores_cleanliness")
+            review_scores_location    = st.slider("Location (1–5)",        1.0, 5.0, step=0.1, key="review_scores_location")
+        else:
+            st.caption("Ratings will be estimated from the dataset average.")
+            review_scores_rating = review_scores_cleanliness = review_scores_location = np.nan
+
+    with st.expander("👤 Host", expanded=False):
+        host_is_superhost = st.checkbox(
+            "Superhost", key="host_is_superhost",
+            help="Superhosts are experienced hosts with high ratings and fast response times. "
+                 "Airbnb awards this badge automatically based on performance.",
+        )
+        host_identity_verified = st.checkbox("Identity verified", key="host_identity_verified",
+                                             help="Host has verified their ID with Airbnb.")
+        host_years = st.slider(
+            "Years hosting", 0.0, 20.0, step=0.5, key="host_years",
+            help="How long the host has been on Airbnb. Calculated from their join date.",
+        )
+        unknown_rates = st.checkbox(
+            "Host rates not shown / unknown", key="unknown_rates",
+            help="Tick if response rate or acceptance rate aren't visible on the listing. "
+                 "The model will use typical host values.",
+        )
+        if not unknown_rates:
+            host_response_rate   = st.slider("Response rate (%)",   0, 100, key="host_response_rate",
+                                             help="% of enquiries the host responds to.")
+            host_acceptance_rate = st.slider("Acceptance rate (%)", 0, 100, key="host_acceptance_rate",
+                                             help="% of booking requests the host accepts.")
+            host_response_time   = st.selectbox(
+                "Response time", RESP_TIMES, key="resp_time",
+                help="How quickly the host typically replies to messages.",
+            )
+        else:
+            st.caption("Host rates will be estimated from the dataset average.")
+            host_response_rate = host_acceptance_rate = np.nan
+            host_response_time = "within a few hours"
+        calculated_host_listings_count = st.number_input(
+            "Host's total listings", 1, 200, key="host_listings",
+            help="How many listings this host manages on Airbnb. "
+                 "Professional hosts with many listings behave differently from occasional renters.",
+        )
 
     st.markdown("---")
     st.markdown("**Option 2 — Predict any hypothetical listing:**")
@@ -495,7 +508,25 @@ with tab_pred:
         | Availability classification | ROC-AUC | 0.50 | **0.70** |
         """)
 
-    if (predict_url_btn and not _lookup_blocked) or predict_manual_btn or _predict_url_pending:
+    _any_predict = (predict_url_btn and not _lookup_blocked) or predict_manual_btn or _predict_url_pending
+    if _any_predict:
+        _missing = []
+        if not st.session_state.get("nb"):
+            _missing.append("Neighbourhood")
+        if not st.session_state.get("rt"):
+            _missing.append("Room type")
+        if not st.session_state.get("pt"):
+            _missing.append("Property type")
+        if _missing:
+            st.session_state._tried_predict = True
+            missing_str = ", ".join(f"**{f}**" for f in _missing)
+            st.error(
+                f"Please fill in all required fields before predicting: {missing_str}. "
+                "Open the **📍 Location & Type** section in the sidebar."
+            )
+            _any_predict = False
+
+    if _any_predict:
         ss = st.session_state
         _no_ratings    = ss.get("no_ratings", False)
         _unknown_rates = ss.get("unknown_rates", False)
@@ -607,7 +638,7 @@ with tab_pred:
             else:
                 st.caption("Moderate — check the calendar directly.")
 
-    else:
+    if not _any_predict and not st.session_state.get("_tried_predict"):
         st.info("**Option 1:** Paste an Airbnb URL above and click **Predict from URL** to check if it's fairly priced against our model.  \n"
                 "**Option 2:** Fill in the sidebar and click **🔮 Predict manual listing** to estimate any hypothetical listing.")
 
