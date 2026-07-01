@@ -138,6 +138,10 @@ for k, v in DEFAULTS.items():
 if st.session_state.get("map_nb_pending"):
     st.session_state.nb = st.session_state.pop("map_nb_pending")
 
+if st.session_state.pop("clear_pending", False):
+    for k, v in DEFAULTS.items():
+        st.session_state[k] = v
+
 if st.session_state.pop("reset_pending", False):
     WIDGET_KEYS = ["nb","rt","pt","accommodates","bedrooms","beds","bathrooms",
                    "amenity_count","minimum_nights","maximum_nights","instant_bookable",
@@ -254,7 +258,7 @@ with st.form("url_form", clear_on_submit=False):
 
 # Handle Clear (must rerun so the emptied url_input key takes effect in the widget)
 if clear_btn:
-    do_clear()
+    st.session_state.clear_pending = True
     st.rerun()
 
 # Handle URL predict — lookup BEFORE sidebar renders so sidebar picks up fresh values
