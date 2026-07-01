@@ -103,6 +103,35 @@ def make_map(selected: str, _stats):
     )
     return fig
 
+@st.cache_data
+def get_feature_importance(_model):
+    try:
+        xgb_step  = list(_model.named_steps.values())[-1]
+        prep_step = list(_model.named_steps.values())[-2]
+        imp = xgb_step.feature_importances_
+        try:
+            names = prep_step.get_feature_names_out()
+            names = [n.split("__", 1)[-1] for n in names]
+        except Exception:
+            names = [f"feature_{i}" for i in range(len(imp))]
+        df = pd.DataFrame({"feature": names, "importance": imp})
+        df = df.groupby("feature", as_index=False)["importance"].sum()
+        return df.sort_values("importance", ascending=False).head(15).reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame({"feature": [], "importance": []})
+
+@st.cache_data
+def dataset_stats(df):
+    prices = df["price_numeric"].dropna()
+    return dict(
+        n_listings   = len(df),
+        n_neigh      = df["neighbourhood_cleansed"].nunique(),
+        price_median = prices.median(),
+        price_min    = prices.quantile(0.05),
+        price_max    = prices.quantile(0.95),
+        pct_booked   = df["low_availability"].mean(),
+    )
+
 price_model, avail_model = load_models()
 lookup_df   = load_lookup()
 neigh_stats = build_neigh_stats(lookup_df)
@@ -158,7 +187,6 @@ if st.session_state.pop("reset_pending", False):
 
 # ── URL lookup helpers ─────────────────────────────────────────────────────────
 def _on_key_field_change():
-    """Clear the listed-price comparison whenever the user edits a key field."""
     if st.session_state.get("prefill_snap") is not None:
         st.session_state.listed_price = None
         st.session_state.prefill_snap = None
@@ -189,7 +217,6 @@ def do_lookup(url: str):
         return
 
     r = row.iloc[0]
-    # Push values into widget keys — Streamlit will pick them up on next render
     nb = _safe(r, "neighbourhood_cleansed", NEIGHBOURHOODS[0])
     rt = _safe(r, "room_type", ROOM_TYPES[0])
     pt = _safe(r, "property_type", PROP_TYPES[0])
@@ -223,7 +250,6 @@ def do_lookup(url: str):
     st.session_state.listed_price = float(price) if price and not pd.isna(price) else None
     st.session_state.listing_name = _safe(r, "name", "Listing")
     st.session_state.lookup_error = None
-    # Snapshot of key fields to detect manual edits later
     st.session_state.prefill_snap = dict(
         nb=st.session_state.nb, rt=st.session_state.rt,
         accommodates=st.session_state.accommodates,
@@ -231,60 +257,7 @@ def do_lookup(url: str):
         minimum_nights=st.session_state.minimum_nights,
     )
 
-def do_clear():
-    for k, v in DEFAULTS.items():
-        st.session_state[k] = v
-
-# ── Main area ─────────────────────────────────────────────────────────────────
-st.title("🏠 Amsterdam Airbnb Stay Value Predictor")
-
-# ── Option 1: URL lookup (wrapped in a form so Enter submits and no "Press Enter to apply" hint appears)
-st.markdown("**Option 1 — Paste an Airbnb URL to check if it's fairly priced:**")
-with st.form("url_form", clear_on_submit=False):
-    col_url, col_pred, col_clr = st.columns([5, 1.4, 1])
-    with col_url:
-        url_input = st.text_input(
-            "URL",
-            placeholder="https://www.airbnb.com/rooms/12345678",
-            label_visibility="collapsed",
-            key="url_input",
-        )
-    with col_pred:
-        predict_url_btn = st.form_submit_button(
-            "🔮 Predict from URL", type="primary", use_container_width=True
-        )
-    with col_clr:
-        clear_btn = st.form_submit_button("✕ Clear", use_container_width=True)
-
-# Handle Clear (must rerun so the emptied url_input key takes effect in the widget)
-if clear_btn:
-    st.session_state.clear_pending = True
-    st.rerun()
-
-# Handle URL predict — lookup BEFORE sidebar renders so sidebar picks up fresh values
-_lookup_blocked = False
-_show_comparison = False
-if predict_url_btn:
-    if url_input.strip():
-        do_lookup(url_input.strip())
-        if st.session_state.lookup_error:
-            _lookup_blocked = True
-        else:
-            _show_comparison = True
-    else:
-        st.info("Paste an Airbnb listing URL above, then click **Predict from URL**. "
-                "Or use **🔮 Predict manual listing** in the left sidebar.")
-
-if st.session_state.lookup_error:
-    st.warning(st.session_state.lookup_error)
-
-# Banner — shown when a listing was matched via URL
-if st.session_state.listed_price is not None:
-    st.success(f"**Found:** {st.session_state.listing_name} · €{st.session_state.listed_price:.0f}/night")
-
-st.markdown("---")
-
-# ── Sidebar ────────────────────────────────────────────────────────────────────
+# ── Sidebar (always visible, independent of tabs) ─────────────────────────────
 with st.sidebar:
     st.title("Listing Details")
 
@@ -294,17 +267,13 @@ with st.sidebar:
     st.button("↺ Reset listing details", use_container_width=True, on_click=_request_reset)
     st.markdown("---")
 
-    # ── Location & Type ───────────────────────────────────────────────────────
     st.subheader("📍 Location & Type")
-
     neighbourhood = st.selectbox(
-        "Neighbourhood",
-        NEIGHBOURHOODS, key="nb",
+        "Neighbourhood", NEIGHBOURHOODS, key="nb",
         index=None, placeholder="Select a neighbourhood…",
         help="The area of Amsterdam the listing is in. This is one of the strongest price predictors.",
         on_change=_on_key_field_change,
     )
-
     with st.popover("🗺️ Pick on map", use_container_width=True):
         st.caption("Size = listing count · Colour = median price")
         map_event = st.plotly_chart(
@@ -317,7 +286,6 @@ with st.sidebar:
             if clicked and clicked in NEIGHBOURHOODS:
                 st.session_state.map_nb_pending = clicked
                 st.rerun()
-
     room_type = st.selectbox(
         "Room type", ROOM_TYPES, key="rt",
         index=None, placeholder="Select a room type…",
@@ -333,26 +301,23 @@ with st.sidebar:
              "Less important than room type for pricing.",
     )
 
-    # ── Property ──────────────────────────────────────────────────────────────
     st.subheader("🏠 Property")
     accommodates = st.slider(
         "Accommodates (guests)", 1, 16, key="accommodates",
         help="Maximum number of guests the listing fits.",
         on_change=_on_key_field_change,
     )
-    bedrooms = st.number_input("Bedrooms",  0, 10, key="bedrooms",
-                               on_change=_on_key_field_change)
-    beds     = st.number_input("Beds",      1, 16, key="beds",
+    bedrooms = st.number_input("Bedrooms", 0, 10, key="bedrooms", on_change=_on_key_field_change)
+    beds     = st.number_input("Beds",     1, 16, key="beds",
                                help="Number of actual beds (can be more than bedrooms — e.g. sofa bed).",
                                on_change=_on_key_field_change)
-    bathrooms = st.number_input("Bathrooms", 0.5, 6.0, step=0.5, key="bathrooms")
+    bathrooms     = st.number_input("Bathrooms", 0.5, 6.0, step=0.5, key="bathrooms")
     amenity_count = st.slider(
         "Number of amenities", 0, 100, key="amenity_count",
         help="Total count of listed amenities — things like WiFi, kitchen, washing machine, "
              "air conditioning, TV, etc. More amenities generally means a higher price.",
     )
 
-    # ── Booking Rules ─────────────────────────────────────────────────────────
     st.subheader("📅 Booking Rules")
     minimum_nights = st.number_input(
         "Minimum nights", 1, 365, key="minimum_nights",
@@ -371,7 +336,6 @@ with st.sidebar:
              "Instant-bookable listings tend to get more bookings.",
     )
 
-    # ── Reviews ───────────────────────────────────────────────────────────────
     st.subheader("⭐ Reviews")
     number_of_reviews = st.number_input(
         "Total reviews", 0, 2000, key="number_of_reviews",
@@ -387,7 +351,6 @@ with st.sidebar:
         help="Average reviews per month over the listing's lifetime. Roughly 50% of stays result "
              "in a review, so multiply by ~2 to estimate actual monthly bookings.",
     )
-
     no_ratings = st.checkbox(
         "No ratings yet (new listing)", key="no_ratings",
         help="Tick this if the listing has no review scores yet. "
@@ -401,7 +364,6 @@ with st.sidebar:
         st.caption("Ratings will be estimated from the dataset average.")
         review_scores_rating = review_scores_cleanliness = review_scores_location = np.nan
 
-    # ── Host ──────────────────────────────────────────────────────────────────
     st.subheader("👤 Host")
     host_is_superhost = st.checkbox(
         "Superhost", key="host_is_superhost",
@@ -414,7 +376,6 @@ with st.sidebar:
         "Years hosting", 0.0, 20.0, step=0.5, key="host_years",
         help="How long the host has been on Airbnb. Calculated from their join date.",
     )
-
     unknown_rates = st.checkbox(
         "Host rates not shown / unknown", key="unknown_rates",
         help="Tick if response rate or acceptance rate aren't visible on the listing. "
@@ -433,7 +394,6 @@ with st.sidebar:
         st.caption("Host rates will be estimated from the dataset average.")
         host_response_rate = host_acceptance_rate = np.nan
         host_response_time = "within a few hours"
-
     calculated_host_listings_count = st.number_input(
         "Host's total listings", 1, 200, key="host_listings",
         help="How many listings this host manages on Airbnb. "
@@ -448,149 +408,376 @@ with st.sidebar:
         use_container_width=True, type="primary", key="manual_predict",
     )
 
+# ── Main area ─────────────────────────────────────────────────────────────────
+st.title("🏠 Amsterdam Airbnb Stay Value Predictor")
+tab_pred, tab_dash = st.tabs(["🔮 Predictor", "📊 Model Dashboard"])
 
-# ── Description ───────────────────────────────────────────────────────────────
-st.markdown(
-    "Trained on **10,480 Inside Airbnb listings** from Amsterdam (Sept 2025). "
-    "Paste a listing URL above to check if it is fairly priced, or fill in details manually."
-)
+# ── Tab 1: Predictor ──────────────────────────────────────────────────────────
+with tab_pred:
+    predict_url_btn = False
+    _lookup_blocked = False
+    _show_comparison = False
 
-with st.expander("🔬 How the models work", expanded=False):
+    st.markdown("**Option 1 — Paste an Airbnb URL to check if it's fairly priced:**")
+    with st.form("url_form", clear_on_submit=False):
+        col_url, col_pred, col_clr = st.columns([5, 1.4, 1])
+        with col_url:
+            url_input = st.text_input(
+                "URL",
+                placeholder="https://www.airbnb.com/rooms/12345678",
+                label_visibility="collapsed",
+                key="url_input",
+            )
+        with col_pred:
+            predict_url_btn = st.form_submit_button(
+                "🔮 Predict from URL", type="primary", use_container_width=True
+            )
+        with col_clr:
+            clear_btn = st.form_submit_button("✕ Clear", use_container_width=True)
+
+    if clear_btn:
+        st.session_state.clear_pending = True
+        st.rerun()
+
+    if predict_url_btn:
+        if url_input.strip():
+            do_lookup(url_input.strip())
+            if st.session_state.lookup_error:
+                _lookup_blocked = True
+            else:
+                _show_comparison = True
+        else:
+            st.info("Paste an Airbnb listing URL above, then click **Predict from URL**. "
+                    "Or use **🔮 Predict manual listing** in the left sidebar.")
+
+    if st.session_state.lookup_error:
+        st.warning(st.session_state.lookup_error)
+
+    if st.session_state.listed_price is not None:
+        st.success(f"**Found:** {st.session_state.listing_name} · €{st.session_state.listed_price:.0f}/night")
+
+    st.markdown("---")
+
+    st.markdown(
+        "Trained on **10,480 Inside Airbnb listings** from Amsterdam (Sept 2025). "
+        "Paste a listing URL above to check if it is fairly priced, or fill in details manually."
+    )
+
+    with st.expander("🔬 How the models work", expanded=False):
+        st.markdown("""
+        ### Architecture
+        Models trained offline on the raw Inside Airbnb CSV. Pipeline:
+        1. **Clean** — parse price string, encode booleans, parse bathrooms, compute host seniority.
+        2. **Engineer** — amenity count, beds-per-person, composite review score, multi-listing flag.
+        3. **No leakage** — `availability_30/60/90/365` excluded from the availability model.
+        4. **Pipeline** — `SimpleImputer → StandardScaler` for numerics; `SimpleImputer → OneHotEncoder` for categoricals — fitted on train only.
+        5. **XGBoost** — tuned with 5-fold `GridSearchCV`.
+
+        | Task | Metric | Baseline | XGBoost |
+        |---|---|---|---|
+        | Price regression | R² | 0.00 | **0.63** |
+        | Price regression | MAE | €100 | **€63** |
+        | Availability classification | ROC-AUC | 0.50 | **0.70** |
+        """)
+
+    if (predict_url_btn and not _lookup_blocked) or predict_manual_btn:
+        ss = st.session_state
+        _no_ratings    = ss.get("no_ratings", False)
+        _unknown_rates = ss.get("unknown_rates", False)
+        _acc  = ss.get("accommodates", 2)
+        _beds = ss.get("beds", 1)
+        _hlc  = ss.get("host_listings", 1)
+        _rsr  = np.nan if _no_ratings else ss.get("review_scores_rating", 4.5)
+        _rsc  = np.nan if _no_ratings else ss.get("review_scores_cleanliness", 4.5)
+        _rsl  = np.nan if _no_ratings else ss.get("review_scores_location", 4.8)
+        _hrr  = np.nan if _unknown_rates else float(ss.get("host_response_rate", 90))
+        _har  = np.nan if _unknown_rates else float(ss.get("host_acceptance_rate", 80))
+
+        _r_scores = [_rsr, _rsc, _rsl]
+        review_composite = (float(np.nanmean([v for v in _r_scores if not (isinstance(v, float) and np.isnan(v))]))
+                            if any(not (isinstance(v, float) and np.isnan(v)) for v in _r_scores) else np.nan)
+
+        X_input = pd.DataFrame([{
+            "accommodates":   _acc,
+            "bathrooms":      ss.get("bathrooms", 1.0),
+            "bedrooms":       ss.get("bedrooms", 1),
+            "beds":           _beds,
+            "minimum_nights": ss.get("minimum_nights", 2),
+            "maximum_nights": ss.get("maximum_nights", 365),
+            "number_of_reviews":     ss.get("number_of_reviews", 20),
+            "number_of_reviews_ltm": ss.get("number_of_reviews_ltm", 5),
+            "reviews_per_month":     ss.get("reviews_per_month", 0.5),
+            "review_composite":          review_composite,
+            "review_scores_rating":      _rsr,
+            "review_scores_cleanliness": _rsc,
+            "review_scores_location":    _rsl,
+            "host_years":            ss.get("host_years", 3.0),
+            "host_response_rate":    _hrr,
+            "host_acceptance_rate":  _har,
+            "calculated_host_listings_count": _hlc,
+            "amenity_count":  ss.get("amenity_count", 30),
+            "beds_per_person": _beds / _acc if _acc > 0 else 1.0,
+            "host_is_superhost":       int(ss.get("host_is_superhost", False)),
+            "host_identity_verified":  int(ss.get("host_identity_verified", True)),
+            "instant_bookable":        int(ss.get("instant_bookable", False)),
+            "multi_listing_host":      int(_hlc > 1),
+            "neighbourhood_cleansed":  ss.get("nb"),
+            "room_type":               ss.get("rt"),
+            "property_type":           ss.get("pt"),
+            "host_response_time":      ss.get("resp_time"),
+        }])
+
+        price_pred  = float(np.expm1(price_model.predict(X_input)[0]))
+        avail_proba = float(avail_model.predict_proba(X_input)[0, 1])
+
+        st.markdown("---")
+        st.subheader("📊 Prediction Results")
+
+        listed = st.session_state.listed_price if _show_comparison else None
+
+        if listed is not None:
+            diff     = listed - price_pred
+            pct_diff = diff / price_pred * 100
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💰 Model's fair price", f"€{price_pred:.0f}")
+            c2.metric("🏷️ Listed price",        f"€{listed:.0f}")
+            c3.metric("📊 Difference", f"€{diff:+.0f}", delta=f"{pct_diff:+.0f}%",
+                      delta_color="inverse")
+
+            if pct_diff > 15:
+                verdict, color = "🔴 Overpriced", "#e53e3e"
+                msg = f"Listed at <b>€{listed:.0f}</b> — <b>{pct_diff:.0f}% above</b> what similar listings charge. Fair value is around €{price_pred:.0f}."
+            elif pct_diff < -15:
+                verdict, color = "🟢 Great deal", "#38a169"
+                msg = f"Listed at <b>€{listed:.0f}</b> — <b>{abs(pct_diff):.0f}% below</b> fair value of €{price_pred:.0f}. Looks like a good deal — book fast."
+            else:
+                verdict, color = "🟡 Fairly priced", "#d69e2e"
+                msg = f"Listed at <b>€{listed:.0f}</b>, model says <b>€{price_pred:.0f}</b> — within 15% of fair value."
+
+            c4.metric("Verdict", verdict)
+            st.markdown(
+                f"<div style='background:{color}22;border-left:4px solid {color};"
+                f"padding:12px 16px;border-radius:4px;margin-top:8px'>{msg}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("---")
+            a1, a2 = st.columns(2)
+            a1.metric("📅 Availability",
+                      "Heavily booked 🔴" if avail_proba >= 0.5 else "Likely available 🟢")
+            a2.metric("🎯 Booking probability", f"{avail_proba:.0%}",
+                      help="Probability this listing has ≤90 open days/year")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("💰 Estimated price", f"€{price_pred:.0f}")
+            c2.metric("📅 Availability",
+                      "Heavily booked 🔴" if avail_proba >= 0.5 else "Likely available 🟢")
+            c3.metric("🎯 Booking probability", f"{avail_proba:.0%}")
+
+        st.markdown("---")
+        pa, pb = st.columns(2)
+        with pa:
+            st.markdown("#### Price context")
+            st.progress(float(min(price_pred / 500, 1.0)))
+            tier = ("Budget" if price_pred < 80 else "Mid-range" if price_pred < 160
+                    else "Premium" if price_pred < 300 else "Luxury")
+            st.caption(f"**{tier}** — Amsterdam median ≈ €130/night.")
+        with pb:
+            st.markdown("#### Availability context")
+            st.progress(float(avail_proba))
+            if avail_proba >= 0.6:
+                st.caption("Typical of heavily-booked listings — book early.")
+            elif avail_proba <= 0.35:
+                st.caption("Plenty of open dates expected.")
+            else:
+                st.caption("Moderate — check the calendar directly.")
+
+    else:
+        st.info("**Option 1:** Paste an Airbnb URL above and click **Predict from URL** to check if it's fairly priced against our model.  \n"
+                "**Option 2:** Fill in the sidebar and click **🔮 Predict manual listing** to estimate any hypothetical listing.")
+
+# ── Tab 2: Model Dashboard ────────────────────────────────────────────────────
+with tab_dash:
+    st.markdown("## About this project")
+    st.markdown(
+        "This app is built on a capstone machine learning project analysing **10,480 Amsterdam Airbnb listings** "
+        "scraped in September 2025 from [Inside Airbnb](https://insideairbnb.com/). "
+        "Two supervised learning tasks were tackled: predicting nightly price (regression) and predicting "
+        "booking demand (classification). Both use gradient-boosted decision trees (XGBoost) inside a "
+        "scikit-learn pipeline."
+    )
+
+    # ── Dataset overview ──────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Dataset overview")
+    ds = dataset_stats(lookup_df)
+    d1, d2, d3, d4, d5 = st.columns(5)
+    d1.metric("Listings", f"{ds['n_listings']:,}")
+    d2.metric("Neighbourhoods", ds["n_neigh"])
+    d3.metric("Median price/night", f"€{ds['price_median']:.0f}")
+    d4.metric("5th–95th price range", f"€{ds['price_min']:.0f} – €{ds['price_max']:.0f}")
+    d5.metric("Heavily booked", f"{ds['pct_booked']:.0%}")
+
+    st.caption("'Heavily booked' = ≤90 open days/year (availability_365 ≤ 90).")
+
+    # Price distribution
+    prices = lookup_df["price_numeric"].dropna()
+    prices_clipped = prices[prices <= 600]
+    fig_hist = go.Figure()
+    fig_hist.add_trace(go.Histogram(
+        x=prices_clipped, nbinsx=60,
+        marker_color="#4a6cf7", opacity=0.8,
+        name="Listings",
+    ))
+    fig_hist.add_vline(
+        x=float(prices.median()), line_dash="dash", line_color="#e53e3e",
+        annotation_text=f"Median €{prices.median():.0f}", annotation_position="top right",
+    )
+    fig_hist.update_layout(
+        title="Nightly price distribution (capped at €600 for readability)",
+        xaxis_title="Price per night (€)", yaxis_title="Number of listings",
+        margin=dict(l=0, r=0, t=40, b=0), height=300,
+        showlegend=False,
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    # Neighbourhood breakdown
+    nb_summary = (
+        lookup_df.groupby("neighbourhood_cleansed")
+        .agg(listings=("id","count"), median_price=("price_numeric","median"),
+             pct_booked=("low_availability","mean"))
+        .reset_index()
+        .sort_values("median_price", ascending=False)
+        .rename(columns={
+            "neighbourhood_cleansed": "Neighbourhood",
+            "listings": "Listings",
+            "median_price": "Median €/night",
+            "pct_booked": "% Heavily booked",
+        })
+    )
+    nb_summary["Median €/night"] = nb_summary["Median €/night"].round(0).astype(int)
+    nb_summary["% Heavily booked"] = (nb_summary["% Heavily booked"] * 100).round(1).astype(str) + "%"
+    with st.expander("Neighbourhood breakdown table", expanded=False):
+        st.dataframe(nb_summary.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    # ── Model pipeline ────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Model pipeline")
     st.markdown("""
-    ### Architecture
-    Models trained offline on the raw Inside Airbnb CSV. Pipeline:
-    1. **Clean** — parse price string, encode booleans, parse bathrooms, compute host seniority.
-    2. **Engineer** — amenity count, beds-per-person, composite review score, multi-listing flag.
-    3. **No leakage** — `availability_30/60/90/365` excluded from the availability model.
-    4. **Pipeline** — `SimpleImputer → StandardScaler` for numerics; `SimpleImputer → OneHotEncoder` for categoricals — fitted on train only.
-    5. **XGBoost** — tuned with 5-fold `GridSearchCV`.
+Both models share the same preprocessing pipeline — only the final estimator differs.
 
-    | Task | Metric | Baseline | XGBoost |
-    |---|---|---|---|
-    | Price regression | R² | 0.00 | **0.63** |
-    | Price regression | MAE | €100 | **€63** |
-    | Availability classification | ROC-AUC | 0.50 | **0.70** |
+| Step | Numerics | Categoricals |
+|------|----------|--------------|
+| Imputation | `SimpleImputer(median)` | `SimpleImputer(most_frequent)` |
+| Encoding | `StandardScaler` | `OneHotEncoder(handle_unknown='ignore')` |
+| Estimator | XGBoost | XGBoost |
+
+**Feature engineering** applied before the pipeline:
+- `amenity_count` — count of listed amenities parsed from the raw JSON array
+- `beds_per_person` — beds ÷ accommodates
+- `review_composite` — average of the three review sub-scores
+- `multi_listing_host` — binary flag for hosts managing more than one listing
+- `host_years` — years since host join date (from the scrape date)
+
+**Train / test split:** 85% train · 15% test (stratified by neighbourhood). Hyperparameters chosen by 5-fold GridSearchCV on the training set only.
     """)
 
-# ── Prediction ────────────────────────────────────────────────────────────────
-if (predict_url_btn and not _lookup_blocked) or predict_manual_btn:
-    # Always read from session state so that a same-click URL lookup is reflected
-    ss = st.session_state
-    _no_ratings    = ss.get("no_ratings", False)
-    _unknown_rates = ss.get("unknown_rates", False)
-    _acc  = ss.get("accommodates", 2)
-    _beds = ss.get("beds", 1)
-    _hlc  = ss.get("host_listings", 1)
-    _rsr  = np.nan if _no_ratings else ss.get("review_scores_rating", 4.5)
-    _rsc  = np.nan if _no_ratings else ss.get("review_scores_cleanliness", 4.5)
-    _rsl  = np.nan if _no_ratings else ss.get("review_scores_location", 4.8)
-    _hrr  = np.nan if _unknown_rates else float(ss.get("host_response_rate", 90))
-    _har  = np.nan if _unknown_rates else float(ss.get("host_acceptance_rate", 80))
-
-    _r_scores = [_rsr, _rsc, _rsl]
-    review_composite = (float(np.nanmean([v for v in _r_scores if not (isinstance(v, float) and np.isnan(v))]))
-                        if any(not (isinstance(v, float) and np.isnan(v)) for v in _r_scores) else np.nan)
-
-    X_input = pd.DataFrame([{
-        "accommodates":   _acc,
-        "bathrooms":      ss.get("bathrooms", 1.0),
-        "bedrooms":       ss.get("bedrooms", 1),
-        "beds":           _beds,
-        "minimum_nights": ss.get("minimum_nights", 2),
-        "maximum_nights": ss.get("maximum_nights", 365),
-        "number_of_reviews":     ss.get("number_of_reviews", 20),
-        "number_of_reviews_ltm": ss.get("number_of_reviews_ltm", 5),
-        "reviews_per_month":     ss.get("reviews_per_month", 0.5),
-        "review_composite":          review_composite,
-        "review_scores_rating":      _rsr,
-        "review_scores_cleanliness": _rsc,
-        "review_scores_location":    _rsl,
-        "host_years":            ss.get("host_years", 3.0),
-        "host_response_rate":    _hrr,
-        "host_acceptance_rate":  _har,
-        "calculated_host_listings_count": _hlc,
-        "amenity_count":  ss.get("amenity_count", 30),
-        "beds_per_person": _beds / _acc if _acc > 0 else 1.0,
-        "host_is_superhost":       int(ss.get("host_is_superhost", False)),
-        "host_identity_verified":  int(ss.get("host_identity_verified", True)),
-        "instant_bookable":        int(ss.get("instant_bookable", False)),
-        "multi_listing_host":      int(_hlc > 1),
-        "neighbourhood_cleansed":  ss.get("nb"),
-        "room_type":               ss.get("rt"),
-        "property_type":           ss.get("pt"),
-        "host_response_time":      ss.get("resp_time"),
-    }])
-
-    price_pred  = float(np.expm1(price_model.predict(X_input)[0]))
-    avail_proba = float(avail_model.predict_proba(X_input)[0, 1])
-
+    # ── Regression: Price Prediction ──────────────────────────────────────────
     st.markdown("---")
-    st.subheader("📊 Prediction Results")
+    st.markdown("### Regression — Price prediction")
+    st.markdown(
+        "The target is the **log-transformed nightly price** (`log1p`). Predictions are "
+        "back-transformed with `expm1` before display. Log-transforming compresses the long "
+        "right tail of the price distribution and makes the residuals more normally distributed."
+    )
 
-    # Only show listed-price comparison in URL mode; manual mode has no real price
-    listed = st.session_state.listed_price if _show_comparison else None
-
-    if listed is not None:
-        diff     = listed - price_pred
-        pct_diff = diff / price_pred * 100
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("💰 Model's fair price", f"€{price_pred:.0f}")
-        c2.metric("🏷️ Listed price",        f"€{listed:.0f}")
-        c3.metric("📊 Difference", f"€{diff:+.0f}", delta=f"{pct_diff:+.0f}%",
-                  delta_color="inverse")
-
-        if pct_diff > 15:
-            verdict, color = "🔴 Overpriced", "#e53e3e"
-            msg = f"Listed at <b>€{listed:.0f}</b> — <b>{pct_diff:.0f}% above</b> what similar listings charge. Fair value is around €{price_pred:.0f}."
-        elif pct_diff < -15:
-            verdict, color = "🟢 Great deal", "#38a169"
-            msg = f"Listed at <b>€{listed:.0f}</b> — <b>{abs(pct_diff):.0f}% below</b> fair value of €{price_pred:.0f}. Looks like a good deal — book fast."
-        else:
-            verdict, color = "🟡 Fairly priced", "#d69e2e"
-            msg = f"Listed at <b>€{listed:.0f}</b>, model says <b>€{price_pred:.0f}</b> — within 15% of fair value."
-
-        c4.metric("Verdict", verdict)
-        st.markdown(
-            f"<div style='background:{color}22;border-left:4px solid {color};"
-            f"padding:12px 16px;border-radius:4px;margin-top:8px'>{msg}</div>",
-            unsafe_allow_html=True,
+    r1, r2 = st.columns(2)
+    with r1:
+        st.markdown("#### Model leaderboard")
+        reg_leaderboard = pd.DataFrame({
+            "Model": ["Dummy (median baseline)", "XGBoost (tuned)"],
+            "R²": [0.00, 0.63],
+            "MAE (€)": [100, 63],
+            "RMSE (€)": ["—", 107],
+        })
+        st.dataframe(reg_leaderboard, use_container_width=True, hide_index=True)
+        st.caption(
+            "R² of 0.63 means the model explains 63% of the variance in nightly price. "
+            "MAE of €63 is the average absolute prediction error on held-out listings."
         )
-        st.markdown("---")
-        a1, a2 = st.columns(2)
-        a1.metric("📅 Availability",
-                  "Heavily booked 🔴" if avail_proba >= 0.5 else "Likely available 🟢")
-        a2.metric("🎯 Booking probability", f"{avail_proba:.0%}",
-                  help="Probability this listing has ≤90 open days/year")
-    else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("💰 Estimated price", f"€{price_pred:.0f}")
-        c2.metric("📅 Availability",
-                  "Heavily booked 🔴" if avail_proba >= 0.5 else "Likely available 🟢")
-        c3.metric("🎯 Booking probability", f"{avail_proba:.0%}")
 
-    st.markdown("---")
-    pa, pb = st.columns(2)
-    with pa:
-        st.markdown("#### Price context")
-        st.progress(float(min(price_pred / 500, 1.0)))
-        tier = ("Budget" if price_pred < 80 else "Mid-range" if price_pred < 160
-                else "Premium" if price_pred < 300 else "Luxury")
-        st.caption(f"**{tier}** — Amsterdam median ≈ €130/night.")
-    with pb:
-        st.markdown("#### Availability context")
-        st.progress(float(avail_proba))
-        if avail_proba >= 0.6:
-            st.caption("Typical of heavily-booked listings — book early.")
-        elif avail_proba <= 0.35:
-            st.caption("Plenty of open dates expected.")
+    with r2:
+        st.markdown("#### Top feature importances")
+        fi_reg = get_feature_importance(price_model)
+        if not fi_reg.empty:
+            fig_reg = go.Figure(go.Bar(
+                x=fi_reg["importance"], y=fi_reg["feature"],
+                orientation="h", marker_color="#4a6cf7",
+            ))
+            fig_reg.update_layout(
+                yaxis=dict(autorange="reversed"),
+                xaxis_title="Importance (gain)", yaxis_title="",
+                margin=dict(l=0, r=0, t=0, b=0), height=380,
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
         else:
-            st.caption("Moderate — check the calendar directly.")
+            st.info("Feature importances could not be extracted from this model.")
 
-else:
-    st.info("**Option 1:** Paste an Airbnb URL above and click **Predict from URL** to check if it's fairly priced against our model.  \n"
-            "**Option 2:** Fill in the sidebar and click **🔮 Predict manual listing** to estimate any hypothetical listing.")
+    # ── Classification: Booking Demand ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Classification — Booking demand")
+    st.markdown(
+        "The target is **`low_availability`**: 1 if the listing has ≤90 open days/year "
+        "(heavily booked), 0 otherwise. This binary label was derived from `availability_365`. "
+        "Note: `availability_365` itself is excluded from the feature set to avoid data leakage."
+    )
 
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Model leaderboard")
+        cls_leaderboard = pd.DataFrame({
+            "Model": ["Dummy (stratified baseline)", "XGBoost (tuned)"],
+            "ROC-AUC": [0.50, 0.70],
+            "Accuracy": ["—", "67%"],
+        })
+        st.dataframe(cls_leaderboard, use_container_width=True, hide_index=True)
+        st.caption(
+            "ROC-AUC of 0.70 means the model correctly ranks a booked listing above an "
+            "available one 70% of the time. Booking demand is harder to predict than price "
+            "because many relevant signals (seasonality, photos, host communication speed) "
+            "aren't in the dataset."
+        )
+
+    with c2:
+        st.markdown("#### Top feature importances")
+        fi_cls = get_feature_importance(avail_model)
+        if not fi_cls.empty:
+            fig_cls = go.Figure(go.Bar(
+                x=fi_cls["importance"], y=fi_cls["feature"],
+                orientation="h", marker_color="#38a169",
+            ))
+            fig_cls.update_layout(
+                yaxis=dict(autorange="reversed"),
+                xaxis_title="Importance (gain)", yaxis_title="",
+                margin=dict(l=0, r=0, t=0, b=0), height=380,
+            )
+            st.plotly_chart(fig_cls, use_container_width=True)
+        else:
+            st.info("Feature importances could not be extracted from this model.")
+
+    # ── Key findings ──────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Key findings")
+    st.markdown("""
+- **Neighbourhood is the strongest price driver.** Centrum-West, Centrum-Oost, and De Pijp command the highest premiums.
+- **Room type matters more than property type.** Entire homes/apartments cost roughly 2× private rooms on average.
+- **Amenity count has a significant positive effect on price**, even after controlling for size.
+- **Review velocity (reviews per month) is the top signal for booking demand**, suggesting that listing activity and recency drive bookings more than headline rating scores.
+- **Superhost status has a modest positive effect** on both price and demand — consistent with the badge signalling reliability.
+- **Log-transforming price** before training reduced MAE by ~12% compared to modelling on the raw scale.
+    """)
+
+# ── Explore Amsterdam (outside tabs) ─────────────────────────────────────────
 st.markdown("---")
 
 st.markdown("### 🌷 Explore Amsterdam")
