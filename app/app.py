@@ -486,28 +486,6 @@ with tab_pred:
 
     st.markdown("---")
 
-    st.markdown(
-        "Trained on **10,480 Inside Airbnb listings** from Amsterdam (Sept 2025). "
-        "Paste a listing URL above to check if it is fairly priced, or fill in details manually."
-    )
-
-    with st.expander("🔬 How the models work", expanded=False):
-        st.markdown("""
-        ### Architecture
-        Models trained offline on the raw Inside Airbnb CSV. Pipeline:
-        1. **Clean** — parse price string, encode booleans, parse bathrooms, compute host seniority.
-        2. **Engineer** — amenity count, beds-per-person, composite review score, multi-listing flag.
-        3. **No leakage** — `availability_30/60/90/365` excluded from the availability model.
-        4. **Pipeline** — `SimpleImputer → StandardScaler` for numerics; `SimpleImputer → OneHotEncoder` for categoricals — fitted on train only.
-        5. **XGBoost** — tuned with 5-fold `GridSearchCV`.
-
-        | Task | Metric | Baseline | XGBoost |
-        |---|---|---|---|
-        | Price regression | R² | 0.00 | **0.63** |
-        | Price regression | MAE | €100 | **€63** |
-        | Availability classification | ROC-AUC | 0.50 | **0.70** |
-        """)
-
     _any_predict = (predict_url_btn and not _lookup_blocked) or predict_manual_btn or _predict_url_pending
     if _any_predict:
         _missing = []
