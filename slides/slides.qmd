@@ -85,7 +85,7 @@ Public data · Creative Commons · No personal information.
 
 ---
 
-## No Data Leakage {background-color="#fff8e1"}
+## No Data Leakage {.smaller background-color="#fff8e1"}
 
 ::: {.callout-warning}
 ## The #1 mistake in ML projects
@@ -121,7 +121,7 @@ We train 4 models per task, from simple to complex:
 
 ---
 
-## Overfitting Demo
+## Overfitting Demo {.smaller}
 
 A Decision Tree with **unlimited depth** memorises the training set:
 
@@ -260,7 +260,7 @@ Python · scikit-learn · XGBoost · Streamlit · joblib
 
 ---
 
-## Key Takeaways {background-color="#f0f4ff"}
+## Key Takeaways {.smaller background-color="#f0f4ff"}
 
 ::: {.incremental}
 1. **Beat the baseline** — XGBoost beats DummyRegressor/DummyClassifier on both tasks ✅
