@@ -2,7 +2,8 @@
 title: "Amsterdam Airbnb Stay Value Predictor"
 subtitle: "Can we predict price and booking demand from listing features?"
 author: "Manca Levašič"
-date: "03/07/2026"
+date: 2026-07-03
+date-format: "DD/MM/YYYY"
 format:
   revealjs:
     theme: simple
@@ -222,7 +223,7 @@ n_estimators:  [200, 300]
 
 ---
 
-## Limitations — Be Honest {background-color="#fff8e1"}
+## Limitations — Be Honest {.smaller background-color="#fff8e1"}
 
 ::: {.callout-important}
 A model that cannot explain its failures is not trustworthy.
