@@ -2,7 +2,7 @@
 title: "Amsterdam Airbnb Stay Value Predictor"
 subtitle: "Can we predict price and booking demand from listing features?"
 author: "Manca Levašič"
-date: "June 2026"
+date: "03/07/2026"
 format:
   revealjs:
     theme: simple
@@ -55,7 +55,7 @@ Public data · Creative Commons · No personal information.
 
 ---
 
-## The Data
+## The Data {.smaller}
 
 ::: {.columns}
 ::: {.column width="60%"}
