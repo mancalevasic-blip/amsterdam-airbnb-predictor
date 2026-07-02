@@ -719,15 +719,20 @@ Both models share the same preprocessing pipeline — only the final estimator d
     with r1:
         st.markdown("#### Model leaderboard")
         reg_leaderboard = pd.DataFrame({
-            "Model": ["Dummy (median baseline)", "XGBoost (tuned)"],
-            "R²": [0.00, 0.63],
-            "MAE (€)": [100, 63],
-            "RMSE (€)": ["—", 107],
+            "Model": [
+                "Dummy (mean baseline)",
+                "Ridge Regression",
+                "Decision Tree (depth=5)",
+                "⭐ XGBoost (tuned)",
+            ],
+            "R²": [0.00, 0.58, 0.44, 0.63],
+            "MAE (€)": [100, 68, 77, 63],
+            "RMSE (€)": ["—", "—", "—", 97],
         })
         st.dataframe(reg_leaderboard, use_container_width=True, hide_index=True)
         st.caption(
-            "R² of 0.63 means the model explains 63% of the variance in nightly price. "
-            "MAE of €63 is the average absolute prediction error on held-out listings."
+            "XGBoost outperforms all simpler models. R² 0.63 vs Ridge 0.58 — the gap comes from "
+            "non-linear interactions (e.g. neighbourhood × room type) that linear regression cannot capture."
         )
 
     with r2:
@@ -760,16 +765,21 @@ Both models share the same preprocessing pipeline — only the final estimator d
     with c1:
         st.markdown("#### Model leaderboard")
         cls_leaderboard = pd.DataFrame({
-            "Model": ["Dummy (stratified baseline)", "XGBoost (tuned)"],
-            "ROC-AUC": [0.50, 0.70],
-            "Accuracy": ["—", "67%"],
+            "Model": [
+                "Dummy (most frequent)",
+                "Logistic Regression",
+                "Decision Tree (depth=5)",
+                "⭐ XGBoost (tuned)",
+            ],
+            "ROC-AUC": [0.50, 0.655, 0.636, 0.70],
+            "Accuracy": ["56%", "62%", "62%", "65%"],
+            "F1": ["0.00", "0.54", "0.49", "0.57"],
         })
         st.dataframe(cls_leaderboard, use_container_width=True, hide_index=True)
         st.caption(
-            "ROC-AUC of 0.70 means the model correctly ranks a booked listing above an "
-            "available one 70% of the time. Booking demand is harder to predict than price "
-            "because many relevant signals (seasonality, photos, host communication speed) "
-            "aren't in the dataset."
+            "XGBoost leads on ROC-AUC (0.70 vs Logistic Regression 0.655). "
+            "Booking demand is harder to predict than price — many relevant signals "
+            "(seasonality, photos, host communication) aren't in the dataset."
         )
 
     with c2:
