@@ -18,12 +18,22 @@ jupyter: python3
 #| label: setup
 #| message: false
 import warnings; warnings.filterwarnings("ignore")
-import os
+import os, ctypes
 
-# macOS without Homebrew: XGBoost needs libomp — reuse sklearn's bundled copy
-_omp = "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sklearn/.dylibs"
-if os.path.isdir(_omp):
-    os.environ.setdefault("DYLD_LIBRARY_PATH", _omp)
+# macOS: pre-load libomp so XGBoost finds it already in memory (DYLD_LIBRARY_PATH
+# is stripped by macOS SIP for child processes, so os.environ tricks don't work).
+_omp_candidates = [
+    "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/site-packages/sklearn/.dylibs/libomp.dylib",
+    "/opt/homebrew/opt/libomp/lib/libomp.dylib",
+    "/usr/local/opt/libomp/lib/libomp.dylib",
+]
+for _p in _omp_candidates:
+    if os.path.exists(_p):
+        try:
+            ctypes.CDLL(_p)
+        except Exception:
+            pass
+        break
 
 import numpy as np
 import pandas as pd
